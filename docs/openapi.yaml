@@ -1,0 +1,523 @@
+openapi: 3.1.0
+info:
+  title: E-Choir API
+  version: 1.0.0
+  description: API for name-based authentication and choir-management workflows.
+servers:
+  - url: http://localhost:4000/api/v1
+tags:
+  - name: Health
+  - name: Authentication
+  - name: Choir
+  - name: Finance
+  - name: Support
+  - name: Platform
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Check API and database readiness
+      responses:
+        "200":
+          description: API and PostgreSQL are available
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Create an account and a new choir workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, password, choirName]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 100 }
+                password: { type: string, minLength: 10, maxLength: 128 }
+                choirName: { type: string, minLength: 2, maxLength: 120 }
+                language: { type: string, enum: [EN, RW, FR], default: EN }
+      responses:
+        "201": { description: Account and choir created; session cookie set }
+        "400": { description: Invalid request }
+        "409": { description: Choir name already in use }
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Create an authenticated session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [choirName, name, password]
+              properties:
+                choirName: { type: string, minLength: 2, maxLength: 120 }
+                name: { type: string, minLength: 2, maxLength: 100 }
+                password: { type: string, minLength: 10, maxLength: 128 }
+      responses:
+        "200": { description: Signed in; session cookie set }
+        "401": { description: Invalid credentials }
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current session
+      security: [{ sessionCookie: [] }]
+      responses:
+        "204": { description: Signed out }
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Return the current account and active choir memberships
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Current account }
+  /auth/preferences:
+    patch:
+      tags: [Authentication]
+      summary: Save the current user's interface language
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [language]
+              properties:
+                language: { type: string, enum: [EN, RW, FR] }
+      responses:
+        "200": { description: Saved language preference }
+  /auth/password:
+    patch:
+      tags: [Authentication]
+      summary: Change the current user's password
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, minLength: 1, maxLength: 128 }
+                newPassword: { type: string, minLength: 10, maxLength: 128 }
+      responses:
+        "204": { description: Password changed }
+        "403": { description: Current password is incorrect }
+  /support/tickets:
+    get:
+      tags: [Support]
+      summary: List the current user's support tickets and public replies
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Requester's tickets }
+    post:
+      tags: [Support]
+      summary: Submit a support ticket for an active choir membership
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject, body]
+              properties:
+                choirId: { type: [string, "null"], format: uuid }
+                subject: { type: string, minLength: 4, maxLength: 200 }
+                body: { type: string, minLength: 10, maxLength: 10000 }
+                priority: { type: string, enum: [LOW, NORMAL, HIGH, URGENT] }
+      responses:
+        "201": { description: Ticket created }
+        "403": { description: User is not an active member of the selected choir }
+  /choirs/{choirId}/finance:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    get:
+      tags: [Finance]
+      summary: List and summarize the authorized choir's external financial records
+      description: Records transactions completed outside E-Choir. This API never processes payments. Access is limited to choir administrators and treasurers.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [INCOME, EXPENSE] } }
+        - { name: status, in: query, schema: { type: string, enum: [PAID, PENDING, PARTIALLY_PAID] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: Choir-scoped records and totals separated by currency }
+        "403": { description: Finance role required }
+    post:
+      tags: [Finance]
+      summary: Record an externally completed or pending financial transaction
+      description: Defaults to PENDING; selecting PAID is a manual bookkeeping assertion, not independent verification.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, transactionDate, amount, category, description]
+              properties:
+                type: { type: string, enum: [INCOME, EXPENSE] }
+                status: { type: string, enum: [PAID, PENDING, PARTIALLY_PAID], default: PENDING }
+                transactionDate: { type: string, format: date-time }
+                amount: { type: number, exclusiveMinimum: 0 }
+                currency: { type: string, pattern: "^[A-Z]{3}$" }
+                category: { type: string, maxLength: 100 }
+                paymentMethod: { type: [string, "null"] }
+                referenceNumber: { type: [string, "null"] }
+                description: { type: string, maxLength: 2000 }
+                receiptReference: { type: [string, "null"], description: Text reference only; file storage is not configured }
+      responses:
+        "201": { description: Record created with an audit entry }
+        "403": { description: Finance role required }
+  /choirs/{choirId}/finance/export.csv:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    get:
+      tags: [Finance]
+      summary: Export filtered financial records as CSV
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Spreadsheet-safe CSV attachment }
+  /platform/dashboard:
+    get:
+      tags: [Platform]
+      summary: Get database-backed platform metrics and health
+      description: Requires an active SUPER_ADMIN account. Storage and backup status are reported as not configured when unavailable.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Platform statistics, grouped financial totals, activity, registration growth, and live API/database health }
+        "403": { description: Platform administrator role required }
+  /platform/choirs:
+    get:
+      tags: [Platform]
+      summary: Search and filter platform choirs
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Choirs, active administrators, and membership counts }
+  /platform/choirs/{choirId}:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    patch:
+      tags: [Platform]
+      summary: Approve, activate, suspend, or archive a choir with an audit reason
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, reason]
+              properties:
+                status: { type: string, enum: [PENDING_APPROVAL, ACTIVE, SUSPENDED, ARCHIVED] }
+                reason: { type: string, minLength: 5, maxLength: 1000 }
+      responses:
+        "200": { description: Choir status updated and audited }
+  /platform/users:
+    get:
+      tags: [Platform]
+      summary: Search accounts and list their choir memberships without password hashes
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: User results and memberships }
+  /platform/users/{userId}:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      tags: [Platform]
+      summary: Change account status or platform staff role with a reason
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Updated account access }
+  /platform/users/{userId}/password-reset:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [Platform]
+      summary: Set a temporary password and revoke existing sessions
+      description: The user must change the temporary password immediately after sign-in. Existing passwords are never returned.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "204": { description: Temporary credential installed; action audited }
+  /platform/finance:
+    get:
+      tags: [Platform]
+      summary: Read cross-choir financial records without changing tenant records
+      description: Requires platform-admin authorization. Values are preserved in their original currencies and never converted or combined.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Filtered records across choirs }
+  /platform/finance/export.csv:
+    get:
+      tags: [Platform]
+      summary: Export filtered cross-choir finance records as CSV
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Spreadsheet-safe CSV attachment }
+  /platform/announcements:
+    get:
+      tags: [Platform]
+      summary: List platform announcements and their audiences
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Announcements }
+    post:
+      tags: [Platform]
+      summary: Publish a notice to all choirs or selected choirs
+      security: [{ sessionCookie: [] }]
+      responses:
+        "201": { description: Announcement published and audited }
+  /platform/tickets:
+    get:
+      tags: [Platform]
+      summary: Review and manage support tickets
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Tickets, history, status, priority, and assignment }
+  /platform/tickets/{ticketId}/replies:
+    parameters:
+      - { name: ticketId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [Platform]
+      summary: Reply to a support ticket as platform staff
+      security: [{ sessionCookie: [] }]
+      responses:
+        "201": { description: Support reply stored in ticket history }
+  /platform/audit:
+    get:
+      tags: [Platform]
+      summary: Read platform administrative audit records
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Paginated audit events }
+  /platform/security-events:
+    get:
+      tags: [Platform]
+      summary: Read authentication and account security events
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Paginated security events without submitted credentials or IP addresses }
+  /platform/settings:
+    get:
+      tags: [Platform]
+      summary: Read configurable platform defaults
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Non-secret application defaults }
+    patch:
+      tags: [Platform]
+      summary: Set default currency, timezone, supported languages, and optional choir approval
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Updated and audited settings }
+  /platform/analytics/registrations.csv:
+    get:
+      tags: [Platform]
+      summary: Export date-filtered choir and user registrations
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: Spreadsheet-safe CSV attachment }
+  /choirs/{choirId}/dashboard:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    get:
+      tags: [Choir]
+      summary: Get database-backed dashboard data
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Dashboard statistics and recent choir activity }
+        "403": { description: User is not an active member of this choir }
+  /choirs/{choirId}/members:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    get:
+      tags: [Choir]
+      summary: Search and paginate choir memberships
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Member results and pagination information }
+    post:
+      tags: [Choir]
+      summary: Create a member account (administrator only)
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, password, role]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 100 }
+                password: { type: string, minLength: 10, maxLength: 128 }
+                role: { type: string, enum: [ADMIN, DIRECTOR, SECTION_LEADER, TREASURER, MEMBER] }
+                sectionId: { type: [string, "null"], format: uuid }
+      responses:
+        "201": { description: Member account created }
+        "409": { description: Full name already used in this choir }
+        "403": { description: Administrator role required }
+  /choirs/{choirId}/members/{membershipId}:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+      - { $ref: "#/components/parameters/MembershipId" }
+    patch:
+      tags: [Choir]
+      summary: Update role, vocal section, or active status
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Updated choir membership }
+        "403": { description: Insufficient permission }
+  /choirs/{choirId}/sections:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    get:
+      tags: [Choir]
+      summary: List choir vocal sections
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Vocal sections }
+  /choirs/{choirId}/audit-logs:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    get:
+      tags: [Choir]
+      summary: Read choir audit records (administrator only)
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Paginated audit entries }
+        "403": { description: Administrator role required }
+  /choirs/{choirId}/songs:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    get:
+      tags: [Choir]
+      summary: Search published songs
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Songs and pagination information }
+    post:
+      tags: [Choir]
+      summary: Add a song (administrator or director)
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 160 }
+                composer: { type: [string, "null"] }
+                category: { type: [string, "null"] }
+                language: { type: [string, "null"] }
+                lyrics: { type: [string, "null"] }
+                musicalKey: { type: [string, "null"] }
+                bpm: { type: [integer, "null"], minimum: 20, maximum: 400 }
+      responses:
+        "201": { description: Song created }
+        "403": { description: Insufficient permission }
+  /choirs/{choirId}/songs/{songId}:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+      - { $ref: "#/components/parameters/SongId" }
+    patch:
+      tags: [Choir]
+      summary: Update song details (administrator or director)
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Updated song }
+    delete:
+      tags: [Choir]
+      summary: Archive a song (administrator or director)
+      security: [{ sessionCookie: [] }]
+      responses:
+        "204": { description: Song archived }
+  /choirs/{choirId}/rehearsals:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+    get:
+      tags: [Choir]
+      summary: List choir rehearsals
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Scheduled and past rehearsals }
+    post:
+      tags: [Choir]
+      summary: Schedule a rehearsal (administrator or director)
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, startsAt, endsAt]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 160 }
+                startsAt: { type: string, format: date-time }
+                endsAt: { type: string, format: date-time }
+                venue: { type: [string, "null"] }
+                description: { type: [string, "null"] }
+      responses:
+        "201": { description: Rehearsal created }
+        "400": { description: Invalid date or end time }
+  /choirs/{choirId}/rehearsals/{rehearsalId}/cancel:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+      - { $ref: "#/components/parameters/RehearsalId" }
+    patch:
+      tags: [Choir]
+      summary: Cancel a rehearsal (administrator or director)
+      security: [{ sessionCookie: [] }]
+      responses:
+        "204": { description: Rehearsal cancelled }
+  /choirs/{choirId}/rehearsals/{rehearsalId}:
+    parameters:
+      - { $ref: "#/components/parameters/ChoirId" }
+      - { $ref: "#/components/parameters/RehearsalId" }
+    patch:
+      tags: [Choir]
+      summary: Update a rehearsal (administrator or director)
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Updated rehearsal }
+components:
+  parameters:
+    ChoirId:
+      name: choirId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MembershipId:
+      name: membershipId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SongId:
+      name: songId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RehearsalId:
+      name: rehearsalId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: echoir_session

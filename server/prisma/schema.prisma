@@ -1,0 +1,669 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChoirRole {
+  ADMIN
+  DIRECTOR
+  SECTION_LEADER
+  TREASURER
+  MEMBER
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SongStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SessionStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum Language {
+  EN
+  RW
+  FR
+}
+
+enum PlatformRole {
+  USER
+  SUPER_ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ChoirStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum FinanceType {
+  INCOME
+  EXPENSE
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+}
+
+enum FinancialApprovalStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum PracticeStatus {
+  NOT_STARTED
+  LEARNING
+  NEEDS_PRACTICE
+  READY
+}
+
+enum ChoirEventType {
+  CONCERT
+  WORSHIP
+  PERFORMANCE
+  OTHER
+}
+
+enum DirectorTaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+
+enum SongResourceType {
+  SHEET_MUSIC
+  PDF
+  AUDIO
+  SOPRANO_TRACK
+  ALTO_TRACK
+  TENOR_TRACK
+  BASS_TRACK
+  OTHER
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model User {
+  id              String            @id @default(uuid()) @db.Uuid
+  passwordHash    String
+  name            String
+  language        Language          @default(EN)
+  platformRole    PlatformRole      @default(USER)
+  accountStatus   AccountStatus     @default(ACTIVE)
+  mustChangePassword Boolean        @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  memberships     ChoirMembership[]
+  sessions        Session[]
+  auditEntries    AuditLog[]        @relation("AuditActor")
+  platformAudits  PlatformAudit[]   @relation("PlatformAuditActor")
+  financialRecords FinancialRecord[] @relation("FinancialRecorder")
+  approvedFinancialRecords FinancialRecord[] @relation("FinancialApprover")
+  financialAudits  FinancialAudit[]
+  announcements   Announcement[]    @relation("AnnouncementAuthor")
+  directorAnnouncements DirectorAnnouncement[]
+  directorTasksCreated DirectorTask[] @relation("DirectorTaskCreator")
+  directorNotesAuthored DirectorNote[]
+  supportTickets  SupportTicket[]   @relation("TicketCreator")
+  assignedTickets SupportTicket[]   @relation("TicketAssignee")
+  supportReplies  SupportReply[]
+  settingsUpdated SystemSetting[]   @relation("SettingUpdater")
+  securityEvents  SecurityEvent[]
+}
+
+model Choir {
+  id          String            @id @default(uuid()) @db.Uuid
+  name        String
+  nameKey     String            @unique
+  timezone    String            @default("Africa/Kigali")
+  currency    String            @default("RWF")
+  status      ChoirStatus       @default(ACTIVE)
+  statusReason String?
+  statusChangedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  memberships ChoirMembership[]
+  sections    VocalSection[]
+  songs       Song[]
+  rehearsals  Rehearsal[]
+  auditLogs   AuditLog[]
+  financialRecords FinancialRecord[]
+  contributionPolicy ContributionPolicy[]
+  contributionExemptions ContributionExemption[]
+  budgets FinancialBudget[]
+  announcements AnnouncementChoir[]
+  directorAnnouncements DirectorAnnouncement[]
+  directorTasks  DirectorTask[]
+  practiceAssignments PracticeAssignment[]
+  events         ChoirEvent[]
+  directorNotes  DirectorNote[]
+  songResources  SongResource[]
+  attendance     Attendance[]
+  rehearsalSongs RehearsalSong[]
+  eventSongs     EventSong[]
+  eventParticipants EventParticipant[]
+  supportTickets SupportTicket[]
+}
+
+model ChoirMembership {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  choirId   String           @db.Uuid
+  loginName String
+  role      ChoirRole        @default(MEMBER)
+  status    MembershipStatus @default(ACTIVE)
+  sectionId String?          @db.Uuid
+  joinedAt  DateTime         @default(now())
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  choir     Choir            @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  section   VocalSection?    @relation(fields: [sectionId, choirId], references: [id, choirId], onDelete: Restrict)
+  attendance Attendance[]
+  practiceAssignments PracticeAssignment[]
+  assignedTasks DirectorTask[] @relation("TaskAssignee")
+  eventParticipation EventParticipant[]
+  financialRecords FinancialRecord[]
+  contributionExemptions ContributionExemption[]
+
+  @@unique([choirId, loginName])
+  @@unique([userId, choirId])
+  @@unique([id, choirId])
+  @@index([choirId, status])
+  @@index([sectionId])
+}
+
+model VocalSection {
+  id          String            @id @default(uuid()) @db.Uuid
+  choirId     String            @db.Uuid
+  name        String
+  createdAt   DateTime          @default(now())
+  choir       Choir             @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  memberships ChoirMembership[]
+  practiceAssignments PracticeAssignment[]
+  directorTasks DirectorTask[]
+  directorAnnouncements DirectorAnnouncement[]
+
+  @@unique([choirId, name])
+  @@unique([id, choirId])
+  @@index([choirId])
+}
+
+model Song {
+  id          String     @id @default(uuid()) @db.Uuid
+  choirId     String     @db.Uuid
+  title       String
+  composer    String?
+  category    String?
+  language    String?
+  lyrics      String?
+  musicalKey  String?
+  bpm         Int?
+  durationSec Int?
+  notes       String?
+  status      SongStatus @default(PUBLISHED)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  choir       Choir      @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  practiceAssignments PracticeAssignment[]
+  rehearsalSongs RehearsalSong[]
+  eventSongs    EventSong[]
+  resources     SongResource[]
+
+  @@unique([choirId, title])
+  @@index([choirId, title])
+  @@index([choirId, status])
+}
+
+model Rehearsal {
+  id          String    @id @default(uuid()) @db.Uuid
+  choirId     String    @db.Uuid
+  title       String
+  startsAt    DateTime
+  endsAt      DateTime
+  venue       String?
+  description String?
+  cancelledAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  choir       Choir     @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  attendance  Attendance[]
+  songs       RehearsalSong[]
+  notes       DirectorNote[]
+
+  @@index([choirId, startsAt])
+}
+
+model Attendance {
+  id           String           @id @default(uuid()) @db.Uuid
+  choirId      String           @db.Uuid
+  rehearsalId  String           @db.Uuid
+  membershipId String           @db.Uuid
+  status       AttendanceStatus
+  note         String?
+  recordedAt   DateTime         @default(now())
+  choir        Choir            @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  rehearsal    Rehearsal        @relation(fields: [rehearsalId], references: [id], onDelete: Cascade)
+  membership   ChoirMembership  @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([rehearsalId, membershipId])
+  @@index([choirId, recordedAt])
+  @@index([choirId, membershipId])
+}
+
+model RehearsalSong {
+  rehearsalId String    @db.Uuid
+  songId      String    @db.Uuid
+  choirId     String    @db.Uuid
+  sortOrder   Int       @default(0)
+  rehearsal   Rehearsal @relation(fields: [rehearsalId], references: [id], onDelete: Cascade)
+  song        Song      @relation(fields: [songId], references: [id], onDelete: Cascade)
+  choir       Choir     @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@id([rehearsalId, songId])
+  @@index([choirId, rehearsalId])
+}
+
+model PracticeAssignment {
+  id           String        @id @default(uuid()) @db.Uuid
+  choirId      String        @db.Uuid
+  songId       String        @db.Uuid
+  sectionId    String?       @db.Uuid
+  membershipId String?       @db.Uuid
+  status       PracticeStatus @default(NOT_STARTED)
+  note         String?
+  dueAt        DateTime?
+  assignedAt   DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  song         Song          @relation(fields: [songId], references: [id], onDelete: Cascade)
+  section      VocalSection? @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  membership   ChoirMembership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  choir        Choir         @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@index([choirId, status, dueAt])
+  @@index([choirId, sectionId])
+  @@index([choirId, membershipId])
+}
+
+model SongResource {
+  id        String           @id @default(uuid()) @db.Uuid
+  choirId   String           @db.Uuid
+  songId    String           @db.Uuid
+  title     String
+  type      SongResourceType
+  url       String?
+  storageName String?
+  contentType String?
+  sizeBytes Int?
+  createdAt DateTime         @default(now())
+  song      Song             @relation(fields: [songId], references: [id], onDelete: Cascade)
+  choir     Choir            @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@index([choirId, songId])
+}
+
+model ChoirEvent {
+  id          String          @id @default(uuid()) @db.Uuid
+  choirId     String          @db.Uuid
+  title       String
+  type        ChoirEventType  @default(OTHER)
+  startsAt    DateTime
+  endsAt      DateTime
+  deadlineAt  DateTime?
+  venue       String?
+  description String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  choir       Choir           @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  songs       EventSong[]
+  participants EventParticipant[]
+
+  @@index([choirId, startsAt])
+}
+
+model EventSong {
+  eventId  String    @db.Uuid
+  songId   String    @db.Uuid
+  choirId  String    @db.Uuid
+  sortOrder Int      @default(0)
+  event    ChoirEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  song     Song      @relation(fields: [songId], references: [id], onDelete: Cascade)
+  choir    Choir     @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, songId])
+  @@index([choirId, eventId])
+}
+
+model EventParticipant {
+  eventId      String          @db.Uuid
+  membershipId String          @db.Uuid
+  choirId      String          @db.Uuid
+  event        ChoirEvent      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  membership   ChoirMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  choir        Choir           @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, membershipId])
+  @@index([choirId, membershipId])
+}
+
+model DirectorAnnouncement {
+  id              String        @id @default(uuid()) @db.Uuid
+  choirId         String        @db.Uuid
+  createdById     String        @db.Uuid
+  targetSectionId String?       @db.Uuid
+  title           String
+  body            String
+  publishedAt     DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  choir           Choir         @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  createdBy       User          @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  targetSection   VocalSection? @relation(fields: [targetSectionId], references: [id], onDelete: Cascade)
+
+  @@index([choirId, publishedAt])
+  @@index([choirId, targetSectionId])
+}
+
+model DirectorTask {
+  id              String            @id @default(uuid()) @db.Uuid
+  choirId         String            @db.Uuid
+  createdById     String            @db.Uuid
+  targetSectionId String?           @db.Uuid
+  assignedToId    String?           @db.Uuid
+  title           String
+  description     String?
+  dueAt           DateTime?
+  status          DirectorTaskStatus @default(OPEN)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  choir           Choir             @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  targetSection   VocalSection?     @relation(fields: [targetSectionId], references: [id], onDelete: Cascade)
+  assignedTo      ChoirMembership?  @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+  createdBy       User              @relation("DirectorTaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([choirId, status, dueAt])
+  @@index([choirId, targetSectionId])
+  @@index([choirId, assignedToId])
+}
+
+model DirectorNote {
+  id          String     @id @default(uuid()) @db.Uuid
+  choirId     String     @db.Uuid
+  authorId    String     @db.Uuid
+  rehearsalId String?    @db.Uuid
+  title       String
+  body        String
+  createdAt   DateTime   @default(now())
+  choir       Choir      @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  author      User       @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  rehearsal   Rehearsal? @relation(fields: [rehearsalId], references: [id], onDelete: SetNull)
+
+  @@index([choirId, createdAt])
+}
+
+model Session {
+  id        String        @id @default(uuid()) @db.Uuid
+  tokenHash String        @unique
+  userId    String        @db.Uuid
+  status    SessionStatus @default(ACTIVE)
+  expiresAt DateTime
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  choirId    String   @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String
+  details    Json?
+  createdAt  DateTime @default(now())
+  choir      Choir    @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([choirId, createdAt])
+  @@index([choirId, entityType, entityId])
+  @@index([actorId, createdAt])
+}
+
+model PlatformAudit {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String   @db.Uuid
+  action     String
+  entityType String
+  entityId   String
+  reason     String?
+  details    Json?
+  createdAt  DateTime @default(now())
+  actor      User     @relation("PlatformAuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+}
+
+model FinancialRecord {
+  id               String        @id @default(uuid()) @db.Uuid
+  choirId          String        @db.Uuid
+  recordedById     String        @db.Uuid
+  membershipId     String?       @db.Uuid
+  type             FinanceType
+  status           PaymentStatus @default(PENDING)
+  approvalStatus   FinancialApprovalStatus @default(NOT_REQUIRED)
+  transactionDate  DateTime
+  contributionMonth DateTime?
+  amount           Decimal       @db.Decimal(14, 2)
+  currency         String        @default("RWF")
+  category         String
+  payerName        String?
+  beneficiary      String?
+  paymentMethod    String?
+  referenceNumber  String?
+  description      String
+  receiptReference String?
+  receiptStorageName String?
+  receiptContentType String?
+  receiptSizeBytes Int?
+  verifiedAt       DateTime?
+  approvedAt       DateTime?
+  approvedById     String?       @db.Uuid
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  choir            Choir         @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  recordedBy       User          @relation("FinancialRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+  membership       ChoirMembership? @relation(fields: [membershipId, choirId], references: [id, choirId], onDelete: Restrict)
+  approvedBy       User?         @relation("FinancialApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  auditEntries     FinancialAudit[]
+
+  @@index([choirId, transactionDate])
+  @@index([choirId, type, status])
+  @@index([choirId, membershipId, contributionMonth])
+  @@index([choirId, approvalStatus, transactionDate])
+  @@index([referenceNumber])
+}
+
+model FinancialAudit {
+  id                String          @id @default(uuid()) @db.Uuid
+  financialRecordId String          @db.Uuid
+  actorId           String          @db.Uuid
+  action            String
+  reason            String?
+  before            Json?
+  after             Json?
+  createdAt         DateTime        @default(now())
+  record            FinancialRecord @relation(fields: [financialRecordId], references: [id], onDelete: Cascade)
+  actor             User            @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([financialRecordId, createdAt])
+}
+
+model ContributionPolicy {
+  id            String   @id @default(uuid()) @db.Uuid
+  choirId       String   @db.Uuid
+  monthlyAmount Decimal  @db.Decimal(14, 2)
+  currency      String   @default("RWF")
+  effectiveFrom DateTime @db.Date
+  createdById   String   @db.Uuid
+  createdAt     DateTime @default(now())
+  choir         Choir    @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@unique([choirId, effectiveFrom])
+  @@index([choirId, effectiveFrom])
+}
+
+model ContributionExemption {
+  id            String          @id @default(uuid()) @db.Uuid
+  choirId       String          @db.Uuid
+  membershipId  String          @db.Uuid
+  startsAt      DateTime        @db.Date
+  endsAt        DateTime?       @db.Date
+  reason        String
+  authorizedById String         @db.Uuid
+  createdAt     DateTime        @default(now())
+  choir         Choir           @relation(fields: [choirId], references: [id], onDelete: Cascade)
+  membership    ChoirMembership @relation(fields: [membershipId, choirId], references: [id, choirId], onDelete: Cascade)
+
+  @@index([choirId, membershipId, startsAt, endsAt])
+}
+
+model FinancialBudget {
+  id          String   @id @default(uuid()) @db.Uuid
+  choirId     String   @db.Uuid
+  name        String
+  category    String
+  amount      Decimal  @db.Decimal(14, 2)
+  currency    String   @default("RWF")
+  startsAt    DateTime @db.Date
+  endsAt      DateTime @db.Date
+  eventId     String?  @db.Uuid
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  choir       Choir    @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@index([choirId, startsAt, endsAt])
+  @@index([choirId, category, currency])
+}
+
+model Announcement {
+  id          String               @id @default(uuid()) @db.Uuid
+  title       String
+  body        String
+  maintenance Boolean              @default(false)
+  publishedAt DateTime?
+  createdById String               @db.Uuid
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  createdBy   User                 @relation("AnnouncementAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  choirs      AnnouncementChoir[]
+
+  @@index([publishedAt])
+}
+
+model AnnouncementChoir {
+  announcementId String       @db.Uuid
+  choirId        String       @db.Uuid
+  announcement  Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  choir         Choir        @relation(fields: [choirId], references: [id], onDelete: Cascade)
+
+  @@id([announcementId, choirId])
+  @@index([choirId])
+}
+
+model SupportTicket {
+  id          String         @id @default(uuid()) @db.Uuid
+  choirId     String?        @db.Uuid
+  createdById String         @db.Uuid
+  assignedToId String?       @db.Uuid
+  subject     String
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(NORMAL)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  choir       Choir?         @relation(fields: [choirId], references: [id], onDelete: SetNull)
+  createdBy   User           @relation("TicketCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  assignedTo  User?          @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  replies     SupportReply[]
+
+  @@index([status, priority, updatedAt])
+  @@index([choirId, createdAt])
+}
+
+model SupportReply {
+  id        String        @id @default(uuid()) @db.Uuid
+  ticketId  String        @db.Uuid
+  authorId  String        @db.Uuid
+  body      String
+  internal  Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt])
+}
+
+model SystemSetting {
+  key         String   @id
+  value       Json
+  updatedById String   @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedBy   User     @relation("SettingUpdater", fields: [updatedById], references: [id], onDelete: Restrict)
+}
+
+model SecurityEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid
+  event     String
+  details   Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([event, createdAt])
+}
